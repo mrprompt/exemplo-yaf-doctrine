@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project name="TesteYaf" default="build" basedir=".">
+    <tstamp/>
+    
+    <property name="application.library" value="${project.basedir}/library"/>
+    <property name="application.tests" value="${project.basedir}/tests"/>
+    <property name="application.builddir" value="${project.basedir}/build"/>
+    
+    <property name="ftp.host" value="" />
+    <property name="ftp.port" value="21" />
+    <property name="ftp.username" value="" />
+    <property name="ftp.password" value="" />
+    <property name="ftp.dir_production" value="" />
+    <property name="ftp.dir_testing" value="" />
+    <property name="ftp.mode" value="binary" />
+    
+    <property name="repo.dir" value="." />
+    <property name="repo.url" value="git@bitbucket.org:menvie/software-avalia-o.git" />
+    <resolvepath propertyName="repo.dir.resolved" file="${repo.dir}" />
+
+    <target name="build" depends="clean,prepare,git-pull,phploc,pdepend,phpmd,phpcs,phpcpd,phpunit,phpcb,phpdoc,git-push"/>
+
+    <target name="clean" description="Limpa os diretórios de artefatos">
+        <delete dir="${application.builddir}/api"/>
+        <delete dir="${application.builddir}/app"/>
+        <delete dir="${application.builddir}/code-browser"/>
+        <delete dir="${application.builddir}/coverage"/>
+        <delete dir="${application.builddir}/logs"/>
+        <delete dir="${application.builddir}/pdepend"/>
+    </target>
+
+    <target name="prepare" description="Cria os diretórios de artefatos">
+        <mkdir dir="${application.builddir}/api"/>
+        <mkdir dir="${application.builddir}/app"/>
+        <mkdir dir="${application.builddir}/app/stable"/>
+        <mkdir dir="${application.builddir}/app/stable/tmp"/>
+        <mkdir dir="${application.builddir}/app/stable/log"/>
+        <mkdir dir="${application.builddir}/code-browser"/>
+        <mkdir dir="${application.builddir}/coverage"/>
+        <mkdir dir="${application.builddir}/logs"/>
+        <mkdir dir="${application.builddir}/pdepend"/>
+    </target>
+
+    <target name="phploc" description="Mede o tamanho da aplicação" depends="prepare">
+        <exec executable="phploc">
+            <arg value="--log-xml" />
+            <arg value="${application.builddir}/logs/phploc.xml" />
+            <arg path="${application.library}" />
+        </exec>
+    </target>
+
+    <target name="pdepend" description="Calcula métricas de software" depends="prepare,phploc">
+        <phpdepend haltonerror="true"
+                   debug="false">
+            <fileset dir="${application.library}">
+                <include name="**/*.php" />
+            </fileset>
+            
+            <logger type="jdepend-xml" outfile="${application.builddir}/logs/phpdepend.xml"/>
+            <logger type="jdepend-chart" outfile="${application.builddir}/pdepend/dependencies.svg"/>
+            <logger type="overview-pyramid" outfile="${application.builddir}/pdepend/overview-pyramid.svg"/>
+            
+            <analyzer type="coderank-mode" value="method"/>
+        </phpdepend>
+    </target>
+
+    <target name="phpmd" description="Detecção de bagunça de código" depends="prepare,phploc,pdepend">
+        <phpmd rulesets="codesize,design,naming,unusedcode">
+            <fileset dir="${application.library}">
+                <include name="**/*.php" />
+            </fileset>
+            
+            <formatter type="xml" outfile="${application.builddir}/logs/pmd.xml"/>
+        </phpmd>
+    </target>
+
+    <target name="phpcs" description="Padrão de código" depends="prepare,phploc,pdepend,phpmd">
+        <echo message="Verificando padrões de código" />
+
+        <phpcodesniffer standard="Zend"
+                        format="full"
+                        showWarnings="true"
+                        showSniffs="false"
+                        tabWidth="4"
+                        file="."
+                        docGenerator="Text"
+                        docFile="${application.builddir}/logs/codesniffer.txt"
+                        encoding="UTF-8"
+                        haltonerror="true"
+                        haltonwarning="true"
+                        allowedFileExtensions="php"
+                        ignorePatterns="./bin" />
+    </target>   
+
+    <target name="phpcpd" description="Testa duplicação de código" depends="prepare,phploc,pdepend,phpmd,phpcs">
+        <phpcpd>
+            <fileset dir="${application.library}">
+                <include name="**/*.php" />
+            </fileset>
+            
+            <formatter type="pmd" outfile="${application.builddir}/logs/pmd-cpd.xml"/>
+        </phpcpd>
+    </target>
+
+    <target name="phpunit" description="Testes Unitários" depends="prepare,phploc,pdepend,phpmd,phpcs,phpcpd">
+        <php expression="ini_set('memory_limit', -1);"/>
+        <php expression="extension_loaded('xdebug');" returnProperty="xdebug"/>
+        
+        <if>
+            <istrue value="${xdebug}"/>
+                <then>
+                    <coverage-setup database="${application.builddir}/coverage/coverage.db">
+                        <fileset dir="${application.tests}" id="tests">
+                            <include name="**/*Test.php"/>
+                        </fileset>
+                    </coverage-setup>
+                    
+                    <phpunit codecoverage="true" 
+                             bootstrap="${application.tests}/bootstrap.php"
+                             printsummary="true" 
+                             haltonfailure="true"
+                             convertErrorsToExceptions="true"
+                             convertNoticesToExceptions="false"
+                             convertWarningsToExceptions="true">
+                        <batchtest>
+                            <fileset dir="${application.tests}">
+                                <include name="**/*Test.php"/>
+                            </fileset>
+                        </batchtest>
+                        <formatter type="clover" todir="${application.builddir}/logs" outfile="clover.xml"/>
+                        <formatter type="xml" todir="${application.builddir}/logs" outfile="phpunit.xml"/>
+                    </phpunit>
+                    
+                    <coverage-report outfile="${application.builddir}/coverage/coverage.xml">
+                        <report todir="${application.builddir}/coverage"/>
+                    </coverage-report>
+                </then>
+            <else>
+                <phpunit codecoverage="false" 
+                         bootstrap="${application.tests}/bootstrap.php"
+                         printsummary="true" 
+                         haltonfailure="true"
+                         convertErrorsToExceptions="true"
+                         convertNoticesToExceptions="false"
+                         convertWarningsToExceptions="true">
+                    <batchtest>
+                        <fileset dir="${application.tests}">
+                            <include name="**/*Test.php"/>
+                        </fileset>
+                    </batchtest>
+                    <formatter type="clover" todir="${application.builddir}/logs" outfile="clover.xml"/>
+                    <formatter type="xml" todir="${application.builddir}/logs" outfile="phpunit.xml"/>
+                </phpunit>
+            </else>
+        </if>
+        
+        <phpunitreport infile="${application.tests}/phpunit.xml" todir="${application.builddir}/logs"/>
+    </target>
+
+    <target name="phpcb" description="Cria a navegação de código" depends="prepare,phploc,pdepend,phpmd,phpcs,phpcpd,phpunit">
+        <exec executable="phpcb">
+            <arg value="--log" />
+            <arg path="${application.builddir}/logs" />
+            <arg value="--source" />
+            <arg path="${application.library}" />
+            <arg path="${application.library}" />
+            <arg value="--output" />
+            <arg path="${application.builddir}/code-browser" />
+        </exec>
+    </target>
+
+    <target name="phpdoc" description="Documentação de API" depends="prepare,phploc,pdepend,phpmd,phpcs,phpcpd,phpunit,phpcb">
+        <phpdoc title="Leviathan API Documentation"
+                destdir="build/api"
+                sourcecode="false"
+                output="HTML:Smarty:PHP"
+                quiet="true"
+                undocumentedelements="true">
+            
+            <fileset dir="${application.library}">
+                <include name="**/*.php" />
+            </fileset>
+        </phpdoc>
+    </target>
+    
+    <target name="git-clone" description="Recupera as mudanças do repositório master" depends="clean,prepare">
+            <echo msg="Clonando repositório master"/>
+            
+            <gitclone repository="${repo.url}" targetPath="${application.builddir}/app/stable" />
+    </target>
+    
+    <target name="git-pull" description="Recupera as mudanças do repositório master" depends="prepare,phploc,pdepend,phpmd,phpcs,phpcpd,phpdoc,phpunit,phpcb,phpdoc">
+            <echo msg="Atualizando projeto a partir do repositório master"/>
+            
+            <gitpull repository="${repo.dir.resolved}" quiet="false" />
+    </target>
+    
+    <target name="git-push" description="Envia as mudanças para o repositório master" depends="prepare,phploc,pdepend,phpmd,phpcs,phpcpd,phpdoc,phpunit,phpcb,phpdoc,git-pull">
+        <gitpush repository="${repo.dir.resolved}" refspec="master" quiet="true" />
+    </target>
+    
+    <target name="deploy-app-test" description="Efetua o deploy no servidor de testes" depends="prepare,git-pull,phploc,pdepend,phpmd,phpcs,phpcpd,phpdoc,phpunit,phpcb,phpdoc,git-push">
+        <echo msg="Enviando modificações para o servidor de testes"/>
+        
+        <ftpdeploy host="${ftp.host}" 
+                   port="${ftp.port}" 
+                   username="${ftp.username}" 
+                   password="${ftp.password}"
+                   dir="${ftp.dir_testing}" 
+                   passive="false"
+                   mode="${ftp.mode}">
+            <fileset dir=".">
+              <include name="application/**"/>
+              <include name="library/**"/>
+              <include name="public/**"/>
+              <include name=".htaccess"/>
+              <include name="build/app/stable/tmp"/>
+              <include name="build/app/stable/log"/>
+              <exclude name="log"/>
+              <exclude name="build"/>
+              <exclude name="tmp"/>
+              <exclude name="docs"/>
+              <exclude name="db"/>
+            </fileset>
+        </ftpdeploy>
+    </target>
+    
+    <target name="deploy-app-master" description="Efetua o deploy no servidor de produção"  depends="prepare,git-clone">
+        <echo msg="Efetuando deploy no servidor master"/>
+        
+        <ftpdeploy host="${ftp.host}" 
+                   port="${ftp.port}" 
+                   username="${ftp.username}" 
+                   password="${ftp.password}"
+                   dir="${ftp.dir_production}" 
+                   passive="false"
+                   mode="${ftp.mode}">
+            <fileset dir=".">
+              <include name="build/app/stable/**"/>
+              <exclude name="build/app/stable/db"/>
+            </fileset>
+        </ftpdeploy>
+        
+        <echo msg="Removendo diretório temporário com a última versão do repositório."/>
+        <delete dir="${application.builddir}/app"/>
+    </target>
+    
+    <target name="deploy-db">
+        <property file="./application/configs/application.ini"/>
+        
+        <input propertyname="environment" 
+               validargs="dev,test,prod">Efetuar migração do banco para qual ambiente?</input>
+        
+        <if>
+            <equals arg1="${environment}" arg2="dev"/>
+            <then>
+                <property name="dbsufix" value=""/>
+            </then>
+            
+            <elseif> 
+                <equals arg1="${environment}" arg2="test"/>
+                <then>
+                    <property name="dbsufix" value="_test"/>
+                </then>
+            </elseif>
+            
+            <else>
+                <then>
+                    <property name="dbsufix" value=""/>
+                </then>
+            </else>
+        </if>
+        
+        <taskdef name="dbdeploy" classname="phing.tasks.ext.dbdeploy.DbDeployTask"/>
+
+        <property name="build.dbdeploy.deployfile" value="db/scripts/deploy-${DSTAMP}${TSTAMP}.sql" />
+        
+        <property name="build.dbdeploy.undofile" value="db/scripts/undo-${DSTAMP}${TSTAMP}.sql" />
+
+        <dbdeploy url="mysql:host=${resources.db.params.host};dbname=${resources.db.params.dbname}${dbsufix}" 
+                  userid="${resources.db.params.username}"
+                  password="${resources.db.params.password}"
+                  dir="db/deltas" 
+                  outputfile="${build.dbdeploy.deployfile}" 
+                  undooutputfile="${build.dbdeploy.undofile}" />
+        
+        <pdosqlexec url="mysql:host=${resources.db.params.host};dbname=${resources.db.params.dbname}${dbsufix}" 
+                    userid="${resources.db.params.username}"
+                    password="${resources.db.params.password}">
+            <transaction src="${build.dbdeploy.deployfile}"/>
+            
+            <formatter type="xml" outfile="build/logs/dbdeploy.xml"/>
+        </pdosqlexec>
+    </target>
+</project>

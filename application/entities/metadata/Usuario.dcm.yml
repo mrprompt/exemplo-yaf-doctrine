@@ -1,0 +1,28 @@
+Usuario:
+    type: entity
+    table: usuario
+    id:
+        id:
+            id: true
+            type: integer
+            unsigned: false
+            nullable: false
+            generator:
+                strategy: IDENTITY
+    fields:
+        nome:
+            type: string
+            length: 120
+            fixed: false
+            nullable: false
+        email:
+            type: string
+            length: 200
+            fixed: false
+            nullable: false
+        senha:
+            type: string
+            length: 120
+            fixed: false
+            nullable: false
+    lifecycleCallbacks: {  }
